@@ -1,0 +1,10 @@
+# terraform-docs settings for the module's README (pre-commit's
+# terraform_docs hook and `mise run docs` both read this file).
+formatter: markdown table
+settings:
+  # The module commits no lock file (consumers pin providers), and a local
+  # .terraform.lock.hcl would print whatever provider version was last
+  # resolved: the README would change with every provider release.
+  lockfile: false
+sort:
+  by: required
