@@ -1,0 +1,118 @@
+---
+# The same hooks as homelab-proxmox-core, minus what a module doesn't have
+# (Packer, Ansible, SOPS files, Trivy and Checkov: those scan VM and cloud
+# resources, and have no rules for the elastic/elasticstack provider).
+repos:
+  # General file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: detect-private-key
+      - id: check-merge-conflict
+      - id: no-commit-to-branch
+
+  # Markdown linting (markdownlint-cli2, the Node engine). Config:
+  # .markdownlint.yaml at the repo root.
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.23.2
+    hooks:
+      - id: markdownlint-cli2
+
+  - repo: local
+    hooks:
+      # Every shell script (by shebang or extension). Binary pinned in
+      # mise.toml, like gitleaks, rather than a separately versioned hook repo.
+      - id: shellcheck
+        name: shellcheck
+        description: Lints shell scripts
+        language: system
+        entry: shellcheck
+        types: [shell]
+
+      # Staged changes only, so it's fast on every commit. The full-history
+      # scan is `mise run lint:secrets` (also run by CI). Binary pinned in
+      # mise.toml; config and allowlist in .gitleaks.toml.
+      - id: gitleaks
+        name: gitleaks (staged changes)
+        language: system
+        entry: gitleaks git --pre-commit --staged --redact --no-banner
+        pass_filenames: false
+
+      # A secret-named OpenTofu variable (token, secret, password, hash,
+      # private key, API key) has no default and is sensitive. Standard
+      # library only; names that only look secret are allowlisted in the
+      # script, with why.
+      - id: secret_variables
+        name: secret variables have no default and are sensitive
+        language: python
+        entry: python scripts/check_secret_variables.py
+        files: \.tf$
+
+      # mise itself: every workflow's jdx/mise-action step pins the same
+      # version as .devcontainer/post-create.sh's MISE_VERSION, so your
+      # workstation, the devcontainer and CI run one mise. Standard library
+      # only.
+      - id: mise_version
+        name: mise is pinned to one version everywhere
+        language: python
+        entry: python scripts/check_mise_version.py
+        files: ^(\.devcontainer/post-create\.sh|\.github/workflows/.*\.ya?ml|scripts/check_mise_version\.py)$
+        pass_filenames: false
+
+      # GitHub Actions workflows. actionlint: syntax, expressions, and
+      # shellcheck on run: steps. zizmor: security (injection, permissions,
+      # credentials, unpinned actions); --offline, so no GitHub API calls.
+      - id: actionlint
+        name: actionlint
+        language: system
+        entry: actionlint
+        files: ^\.github/workflows/.*\.ya?ml$
+      - id: zizmor
+        name: zizmor
+        language: system
+        entry: zizmor --offline --no-progress
+        files: ^\.github/workflows/.*\.ya?ml$
+
+  # OpenTofu formatting, validation, docs and linting, run with `tofu`.
+  # --tf-path is set per hook, not via the PCT_TFPATH env var: git hooks
+  # fired from a shell without `mise activate` never see mise.toml's [env],
+  # and would silently fall back to `terraform`.
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.104.0
+    hooks:
+      - id: terraform_fmt
+        args:
+          - --hook-config=--tf-path=tofu
+          - --args=-no-color
+          - --args=-diff
+          - --args=-recursive
+
+      - id: terraform_validate
+        args:
+          - --hook-config=--tf-path=tofu
+          - --args=-json
+          - --args=-no-color
+
+      # The module's README.md (root) and each example's: inputs, outputs
+      # and providers between terraform-docs' markers.
+      - id: terraform_docs
+        args:
+          - --hook-config=--tf-path=tofu
+          - --hook-config=--path-to-file=README.md
+          - --hook-config=--add-to-existing-file=true
+          - --hook-config=--create-file-if-not-exist=true
+
+      - id: terraform_tflint
+        args:
+          - --hook-config=--tf-path=tofu
+          - --args=--config=__GIT_WORKING_DIR__/.tflint.hcl
+
+  # Commit message linting
+  - repo: https://github.com/alessandrojcm/commitlint-pre-commit-hook
+    rev: v9.23.0
+    hooks:
+      - id: commitlint
+        stages: [commit-msg]
+        additional_dependencies: ["@commitlint/config-conventional"]

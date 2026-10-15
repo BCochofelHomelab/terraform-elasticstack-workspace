@@ -1,0 +1,40 @@
+# age private keys live outside the repo, but guard against copies
+*.agekey
+keys.txt
+bcochofel.txt
+ai-agent.txt
+# any accidental decrypted output
+*.decrypted
+*.dec.yaml
+
+# OpenTofu. A module commits no lock file: each consumer locks its own
+# providers (CONTRIBUTING.md).
+.terraform/
+**/.terraform/*
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+*.tfplan
+tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Keys and certificates never belong in the repo
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Tooling
+node_modules/
+.venv/
+.claude/settings.local.json
+.DS_Store

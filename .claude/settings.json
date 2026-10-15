@@ -1,0 +1,68 @@
+{
+  "disableClaudeAiConnectors": true,
+  "attribution": {
+    "pr": ""
+  },
+  "env": {
+    "SOPS_AGE_KEY_FILE": "/home/bcochofel/.config/sops/age/ai-agent.txt"
+  },
+  "permissions": {
+    "deny": [
+      "Read(~/.config/sops/age/bcochofel.txt)",
+      "Read(~/.config/sops/age/ai-agent.txt)",
+      "Read(~/.config/sops/age/keys.txt)",
+      "Read(~/.config/sops/age/ci.txt)",
+      "Read(~/.ssh/**)",
+      "Read(~/.secrets/**)",
+      "Bash(sops -d *)",
+      "Bash(sops --decrypt *)",
+      "Bash(sops decrypt *)",
+      "Bash(sops edit *)",
+      "Bash(sops exec-env *)",
+      "Bash(sops exec-file *)",
+      "Bash(sops set *)",
+      "Bash(sops unset *)",
+      "Bash(sops rotate *)",
+      "Bash(mise x *)",
+      "Bash(mise -* x *)",
+      "Bash(mise *exec *)",
+      "Bash(terraform destroy *)",
+      "Bash(tofu destroy *)",
+      "Bash(git credential *)",
+      "Bash(*git-credential-ai-agent get*)",
+      "Bash(git push -f*)",
+      "Bash(git push --force*)",
+      "Bash(git push * -f*)",
+      "Bash(git push *--force*)",
+      "Bash(git push *--delete*)",
+      "Bash(git push * :*)",
+      "Bash(git push * -d *)",
+      "Bash(git push *+*)",
+      "Bash(gh auth *)",
+      "Bash(gh pr merge *)",
+      "Bash(gh pr review *)",
+      "Bash(gh release *)",
+      "Bash(gh repo delete *)",
+      "Bash(gh secret *)",
+      "Bash(gh variable *)",
+      "Bash(gh workflow *)",
+      "Bash(gh api *-X*)",
+      "Bash(gh api *--method*)",
+      "Bash(gh api -f*)",
+      "Bash(gh api * -f*)",
+      "Bash(gh api -F*)",
+      "Bash(gh api * -F*)",
+      "Bash(gh api *--field*)",
+      "Bash(gh api *--raw-field*)",
+      "Bash(gh api *--input*)",
+      "Bash(git tag *)",
+      "Bash(git push *--tags*)",
+      "Bash(git push *--follow-tags*)",
+      "Bash(git push *refs/tags/*)"
+    ],
+    "ask": [
+      "Bash(terraform apply *)",
+      "Bash(tofu apply *)"
+    ]
+  }
+}

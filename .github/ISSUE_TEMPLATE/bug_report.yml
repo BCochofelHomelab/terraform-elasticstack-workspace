@@ -1,0 +1,34 @@
+name: Bug report
+description: Something in the cluster or pipeline is broken
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Include exact commands/output where possible.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Module (space, data views, access, content, alerting)
+        - Tests
+        - Examples
+        - CI/CD / tooling
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Relevant VM(s), branch, or related issue.
