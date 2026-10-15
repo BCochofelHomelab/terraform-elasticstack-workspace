@@ -1,0 +1,85 @@
+---
+# Module CI. Same shape as homelab-proxmox-core's ci.yml: everything runs on
+# GitHub-hosted runners, with no secrets. The module never touches a real
+# cluster: unit tests mock the provider, and integration tests apply to a
+# throwaway Elasticsearch + Kibana started in Docker on the runner.
+name: CI
+
+# pull_request only, not push to main: see homelab-proxmox-core's ci.yml
+# (the no-commit-to-branch hook can't pass on main itself).
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  # Install exactly what mise.lock records (versions and checksums). A
+  # mise.toml change without a matching `mise lock` fails here.
+  MISE_LOCKED: "1"
+
+jobs:
+  check:
+    name: lint, validate, unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # gitleaks scans the full history
+          persist-credentials: false # nothing here pushes
+
+      - name: Install pinned toolchain (mise)
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          version: "2026.10.9" # mise itself: the same as .devcontainer/post-create.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }} # tflint plugin downloads
+
+      - name: Cache pre-commit hook environments
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: Pre-warm Trivy's misconfiguration checks bundle
+        # The terraform_trivy hook runs once per directory, in parallel; on a
+        # cold cache those runs race on the same bundle download
+        # (homelab-proxmox-core's ci.yml has the full story).
+        run: |
+          mkdir -p /tmp/.cache/trivy
+          trivy config --cache-dir /tmp/.cache/trivy --config .trivy.yaml . >/dev/null
+
+      - name: pre-commit, gitleaks, validate, unit tests
+        env:
+          GITHUB_TOKEN: ${{ github.token }} # tflint plugin downloads
+        run: mise run check
+
+  integration:
+    name: integration (stack ${{ matrix.stack_version }})
+    needs: check
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The stack versions the module must work on. Keep the newest in
+        # sync with mise.toml's test:integration STACK_VERSION.
+        stack_version: ["8.19.0", "9.1.0"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install OpenTofu (pinned in mise.toml)
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          version: "2026.10.9" # mise itself: the same as .devcontainer/post-create.sh
+          install_args: opentofu
+        env:
+          MISE_SKIP_BOOTSTRAP: "1"
+
+      - name: Apply, check and destroy against a throwaway stack
+        env:
+          STACK_VERSION: ${{ matrix.stack_version }}
+        run: mise run test:integration
