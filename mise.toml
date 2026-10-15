@@ -1,0 +1,124 @@
+# mise.toml — the single declaration of this repo's toolchain.
+#
+#   mise trust && mise install
+#
+# installs every pinned tool and (via the postinstall hook) runs
+# `mise run bootstrap`: git hooks, commit template and TFLint plugins. The
+# same file drives CI through jdx/mise-action, so local and CI run identical
+# versions. Versions match homelab-proxmox-core's mise.toml; bump them
+# together.
+#
+# Bumping a version: `mise run outdated`, edit the pin below, then `mise lock`
+# and commit mise.toml, mise.lock and .mise/locks/ together. CI installs in
+# locked mode (MISE_LOCKED=1), so a version change without `mise lock` fails
+# CI. There's no Dependabot/Renovate for this file — bumps are deliberate.
+
+[settings]
+# Linux only (Ubuntu native or WSL2), see CONTRIBUTING.md.
+lockfile_platforms = ["linux-x64"]
+
+[tools]
+# The module is OpenTofu only: no Terraform rollback pin, nothing to apply.
+opentofu       = "1.13.1"
+# Lint / docs
+tflint         = "0.64.0"
+terraform-docs = "0.24.0"
+# Security
+trivy          = "0.72.0"
+gitleaks       = "8.30.1"
+shellcheck     = "0.11.0"
+# GitHub Actions workflows: actionlint (syntax, expressions, shellcheck on
+# run: steps) and zizmor (security: injection, permissions, pinning).
+actionlint     = "1.7.12"
+zizmor         = "1.30.1"
+# SOPS + age: this repo holds no secrets; they're here for the devcontainer,
+# whose gh wrapper and credential helper decrypt the AI agent's PAT.
+sops           = "3.13.3"
+age            = "1.3.2"
+# Git hooks
+"pipx:pre-commit" = "4.6.2"
+# GitHub CLI. In the devcontainer it runs as the AI agent's machine user,
+# through the wrapper in .devcontainer/bin.
+gh             = "2.102.0"
+# Runtimes: python for scripts/ and pre-commit, uv for pipx installs, node
+# for pre-commit's node hooks (commitlint, markdownlint-cli2) and
+# semantic-release.
+python = "3.14.8"
+uv     = "0.12.22"
+node   = "24.21.0"
+# MCP servers for the AI agent (.mcp.json). The Terraform one is how the
+# agent reads the elasticstack provider's resource schemas (CLAUDE.md).
+"aqua:github/github-mcp-server"       = "1.14.0"
+# HashiCorp ships this one on releases.hashicorp.com, not as GitHub release
+# assets, so aqua can't resolve it: plain download, checksum from its
+# SHA256SUMS file. Bumping it means updating version, url and checksum.
+"http:terraform-mcp-server" = { version = "1.3.0", url = "https://releases.hashicorp.com/terraform-mcp-server/1.3.0/terraform-mcp-server_1.3.0_linux_amd64.zip", checksum = "sha256:f8ecdbfb8473af4d54f6ca428de59649ff4c74f1c8a904da1c2973fa345d4d26" }
+
+[hooks]
+# Runs after every `mise install`. Idempotent, so safe to re-run.
+# MISE_SKIP_BOOTSTRAP=1 skips it, for CI jobs that need a single tool (the
+# release workflow only needs node).
+postinstall = '[ -n "${MISE_SKIP_BOOTSTRAP:-}" ] || mise run bootstrap'
+
+# ---------------------------------------------------------------------------
+# Tasks. None of them needs a credential: the module is tested against
+# mocked providers (unit) and a throwaway Docker stack (integration).
+# ---------------------------------------------------------------------------
+
+[tasks.bootstrap]
+description = "One-time setup after clone (runs automatically after mise install)"
+depends = ["setup:hooks", "setup:tflint"]
+run = "echo 'bootstrap complete'"
+
+[tasks."setup:hooks"]
+description = "Install git hooks (pre-commit + commit-msg) and the commit template"
+run = [
+  "pre-commit install --install-hooks",
+  "pre-commit install --hook-type commit-msg",
+  "git config --local commit.template .gitmessage",
+]
+
+[tasks."setup:tflint"]
+description = "Download TFLint rulesets declared in .tflint.hcl"
+run = "tflint --init --config=.tflint.hcl"
+
+[tasks.lint]
+description = "Run every pre-commit hook on all files"
+run = "pre-commit run --all-files"
+
+[tasks."lint:secrets"]
+description = "Scan the full git history for leaked secrets (gitleaks)"
+run = "gitleaks git --redact --no-banner ."
+
+[tasks.validate]
+description = "tofu init -backend=false + validate, for the module and every example"
+run = "scripts/validate.sh"
+
+[tasks.test]
+description = "Unit tests: tofu test with a mocked provider, offline"
+run = [
+  "tofu init -backend=false -input=false -no-color >/dev/null",
+  "tofu test -no-color",
+]
+
+[tasks."test:integration"]
+description = "Integration tests: throwaway Elasticsearch + Kibana in Docker, real apply/destroy (needs Docker)"
+# Keep in sync with the integration matrix in .github/workflows/ci.yml.
+env = { STACK_VERSION = "9.1.0" }
+run = "scripts/integration.sh"
+
+[tasks.docs]
+description = "Regenerate the terraform-docs sections of README.md"
+run = "terraform-docs markdown table --output-file README.md --output-mode inject ."
+
+[tasks.check]
+description = "Everything CI runs on a pull request, except the integration tests"
+depends = ["lint", "lint:secrets", "validate", "test"]
+
+[tasks.doctor]
+description = "Diagnose the local toolchain"
+run = ["mise doctor", "mise ls --current"]
+
+[tasks.outdated]
+description = "Show which pinned tools and pre-commit hooks could be bumped"
+run = ["mise outdated", "pre-commit autoupdate --dry-run || true"]

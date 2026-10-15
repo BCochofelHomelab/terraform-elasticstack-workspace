@@ -1,0 +1,129 @@
+---
+# Adapted from homelab-proxmox-core's .pre-commit-config.yaml: the same
+# hooks and versions, minus Packer, Ansible, SOPS and Checkov (none of them
+# apply to a provider-agnostic module), pointed at the module root and
+# examples/ instead of terraform/.
+repos:
+  # General file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: detect-private-key
+      - id: check-merge-conflict
+      - id: no-commit-to-branch
+
+  # Markdown linting (markdownlint-cli2, the Node engine). Config:
+  # .markdownlint.yaml at the repo root.
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.23.2
+    hooks:
+      - id: markdownlint-cli2
+
+  - repo: local
+    hooks:
+      # Every shell script (by shebang or extension). Binary pinned in mise.toml.
+      - id: shellcheck
+        name: shellcheck
+        description: Lints shell scripts
+        language: system
+        entry: shellcheck
+        types: [shell]
+
+      # Staged changes only, so it's fast on every commit. The full-history
+      # scan is `mise run lint:secrets` (also run by CI).
+      - id: gitleaks
+        name: gitleaks (staged changes)
+        language: system
+        entry: gitleaks git --pre-commit --staged --redact --no-banner
+        pass_filenames: false
+
+      # A secret-named variable has no default and is sensitive (same rule
+      # and script as homelab-proxmox-core).
+      - id: secret_variables
+        name: secret variables have no default and are sensitive
+        language: python
+        entry: python scripts/check_secret_variables.py
+        files: \.tf$
+
+      # Every workflow's jdx/mise-action step pins the same mise version as
+      # .devcontainer/post-create.sh's MISE_VERSION.
+      - id: mise_version
+        name: mise is pinned to one version everywhere
+        language: python
+        entry: python scripts/check_mise_version.py
+        files: ^(\.devcontainer/post-create\.sh|\.github/workflows/.*\.ya?ml|scripts/check_mise_version\.py)$
+        pass_filenames: false
+
+      # Baseline templates must stay valid NDJSON after rendering, or every
+      # workspace's import fails at apply time.
+      - id: saved_object_templates
+        name: baseline saved-object templates render to valid NDJSON
+        language: python
+        entry: python scripts/check_saved_object_templates.py
+        files: ^(templates/saved-objects/.*\.tftpl|dashboards\.tf|scripts/check_saved_object_templates\.py)$
+        pass_filenames: false
+
+      - id: actionlint
+        name: actionlint
+        language: system
+        entry: actionlint
+        files: ^\.github/workflows/.*\.ya?ml$
+      - id: zizmor
+        name: zizmor
+        language: system
+        entry: zizmor --offline --no-progress
+        files: ^\.github/workflows/.*\.ya?ml$
+
+  # OpenTofu formatting, validation, docs and linting. --tf-path is set per
+  # hook (see homelab-proxmox-core): without it a hook fired outside `mise
+  # activate` would fall back to `terraform`.
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.104.0
+    hooks:
+      - id: terraform_fmt
+        args:
+          - --hook-config=--tf-path=tofu
+          - --args=-no-color
+          - --args=-diff
+          - --args=-recursive
+        files: (\.tf|\.tftest\.hcl)$
+
+      - id: terraform_validate
+        args:
+          - --hook-config=--tf-path=tofu
+          - --args=-json
+          - --args=-no-color
+        files: \.tf$
+
+      # The module's README only: examples/ READMEs are hand-written.
+      - id: terraform_docs
+        args:
+          - --hook-config=--tf-path=tofu
+          - --hook-config=--path-to-file=README.md
+          - --hook-config=--add-to-existing-file=true
+          - --hook-config=--create-file-if-not-exist=true
+        files: ^[^/]+\.tf$
+
+      - id: terraform_tflint
+        args:
+          - --hook-config=--tf-path=tofu
+          - --args=--config=__GIT_WORKING_DIR__/.tflint.hcl
+          - --args=--call-module-type=all
+        files: \.tf$
+
+      - id: terraform_trivy
+        args:
+          - --args=--config=__GIT_WORKING_DIR__/.trivy.yaml
+          - --args=--cache-dir=/tmp/.cache/trivy
+          - --args=--ignorefile=__GIT_WORKING_DIR__/.trivyignore
+        files: \.tf$
+
+  # Commit message linting
+  - repo: https://github.com/alessandrojcm/commitlint-pre-commit-hook
+    rev: v9.23.0
+    hooks:
+      - id: commitlint
+        stages: [commit-msg]
+        additional_dependencies: ["@commitlint/config-conventional"]
