@@ -1,0 +1,26 @@
+name: Task / roadmap item
+description: Planned work — new phase item, improvement, or follow-up
+labels: ["task"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What needs to be done
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Module (space, data views, access, content, alerting)
+        - Tests
+        - Examples
+        - CI/CD / tooling
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why / context

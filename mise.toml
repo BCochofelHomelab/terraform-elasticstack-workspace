@@ -1,0 +1,201 @@
+# mise.toml — the single declaration of this repo's toolchain.
+#
+#   mise trust && mise install
+#
+# installs every pinned tool and (via the postinstall hook) runs
+# `mise run bootstrap`: git hooks, commit template and TFLint plugins. The
+# same file drives CI through jdx/mise-action, so local and CI run identical
+# versions. Versions match homelab-proxmox-core's.
+#
+# Bumping a version: `mise run outdated`, edit the pin below, then `mise lock`
+# and commit mise.toml and mise.lock together. CI installs in locked mode
+# (MISE_LOCKED=1), so a version change without `mise lock` fails CI. There's
+# no Dependabot/Renovate for this file — bumps are deliberate.
+
+[settings]
+# Linux only (Ubuntu native or WSL2), see CONTRIBUTING.md.
+lockfile_platforms = ["linux-x64"]
+
+[tools]
+# The module is plain OpenTofu: no Packer, Ansible, Terramate or state.
+opentofu       = "1.13.1"
+# Lint / docs
+tflint         = "0.64.0"
+terraform-docs = "0.24.0"
+gitleaks       = "8.30.1"
+shellcheck     = "0.11.0"
+# GitHub Actions workflows: actionlint (syntax, expressions, shellcheck on
+# run: steps) and zizmor (security: injection, permissions, pinning).
+actionlint     = "1.7.12"
+zizmor         = "1.30.1"
+# SOPS + age: only for the devcontainer's credential helper and MCP servers,
+# which open the AI agent's own files; this repo holds no secrets.
+sops           = "3.13.3"
+age            = "1.3.2"
+# Git hooks
+"pipx:pre-commit" = "4.6.2"
+# GitHub CLI. In the devcontainer it runs as the AI agent's machine user,
+# through the wrapper in .devcontainer/bin.
+gh             = "2.102.0"
+# Runtimes: python and uv for pre-commit (pipx) and scripts/, node so
+# pre-commit's node hooks (commitlint, markdownlint-cli2) use this pinned
+# node.
+python = "3.14.8"
+uv     = "0.12.22"
+node   = "24.21.0"
+# MCP servers for the AI agent (.mcp.json): GitHub, read-only, and the
+# Terraform registry, for the elastic/elasticstack provider's schema.
+"aqua:github/github-mcp-server"       = "1.14.0"
+# HashiCorp ships this one on releases.hashicorp.com, not as GitHub release
+# assets, so aqua can't resolve it: plain download, checksum from its
+# SHA256SUMS file. Bumping it means updating version, url and checksum.
+"http:terraform-mcp-server" = { version = "1.3.0", url = "https://releases.hashicorp.com/terraform-mcp-server/1.3.0/terraform-mcp-server_1.3.0_linux_amd64.zip", checksum = "sha256:f8ecdbfb8473af4d54f6ca428de59649ff4c74f1c8a904da1c2973fa345d4d26" }
+
+[hooks]
+# Runs after every `mise install`. Idempotent, so safe to re-run.
+# MISE_SKIP_BOOTSTRAP=1 skips it, for CI jobs that need a single tool.
+postinstall = '[ -n "${MISE_SKIP_BOOTSTRAP:-}" ] || mise run bootstrap'
+
+# ---------------------------------------------------------------------------
+# Tasks. None of them needs a credential: the module never touches a real
+# cluster (its integration tests start their own, in Docker).
+# ---------------------------------------------------------------------------
+
+[tasks.bootstrap]
+description = "One-time setup after clone (runs automatically after mise install)"
+depends = ["setup:hooks", "setup:tflint"]
+run = "echo 'bootstrap complete'"
+
+[tasks."setup:hooks"]
+description = "Install git hooks (pre-commit + commit-msg) and the commit template"
+run = [
+  "pre-commit install --install-hooks",
+  "pre-commit install --hook-type commit-msg",
+  "git config --local commit.template .gitmessage",
+]
+
+[tasks."setup:tflint"]
+description = "Download TFLint rulesets declared in .tflint.hcl"
+run = "tflint --init --config=.tflint.hcl"
+
+[tasks.lint]
+description = "Run every pre-commit hook on all files"
+run = "pre-commit run --all-files"
+
+[tasks."lint:secrets"]
+description = "Scan the full git history for leaked secrets (gitleaks)"
+run = "gitleaks git --redact --no-banner ."
+
+[tasks.check]
+description = "Everything CI runs on a pull request"
+depends = ["lint", "lint:secrets"]
+
+[tasks.doctor]
+description = "Diagnose the local toolchain"
+run = ["mise doctor", "mise ls --current"]
+
+[tasks.outdated]
+description = "Show which pinned tools and pre-commit hooks could be bumped"
+run = ["mise outdated", "pre-commit autoupdate --dry-run || true"]
+
+[tasks."check:boundary"]
+description = "Prove the AI agent's boundary using only the ai-agent key: WSL or devcontainer (prints ok/FAIL, never a value)"
+shell = "bash -c"
+run = '''
+agent="$HOME/.config/sops/age/ai-agent.txt"
+ro="$HOME/.secrets/homelab-ro.yaml"
+rc=0
+ok()   { echo "ok    $1"; }
+fail() { echo "FAIL  $1"; rc=1; }
+# Only the ai-agent key: an empty HOME hides anything at SOPS's default key path.
+as_agent() { HOME=$(mktemp -d) SOPS_AGE_KEY_FILE=$agent "$@"; }
+
+if env | grep -qE '^(PKR_VAR_|TF_VAR_|TF_TOKEN_|PROXMOX_|ELASTICSEARCH_|KIBANA_|GITHUB_PERSONAL)'; then
+  fail "credentials are exported into this shell"; else ok "no credentials exported into this shell"; fi
+
+if as_agent sops -d "$ro" >/dev/null 2>&1; then
+  ok "ai-agent key opens homelab-ro.yaml"; else fail "ai-agent key can't open homelab-ro.yaml"; fi
+
+f="$HOME/.secrets/homelab.yaml"
+if [ ! -e "$f" ]; then ok ".secrets/homelab.yaml not present"
+elif as_agent sops -d "$f" >/dev/null 2>&1; then fail "ai-agent key opens .secrets/homelab.yaml"
+else ok "ai-agent key refused by .secrets/homelab.yaml"; fi
+
+if [ -e "$HOME/.config/sops/age/keys.txt" ]; then
+  fail "a key exists at SOPS's default path ~/.config/sops/age/keys.txt"; else ok "no key at SOPS's default path"; fi
+
+# The AI agent on WSL can write .git/config, and git runs code from some of
+# its keys (or redirects remotes, or pulls in other files).
+risky=$(git config --local --get-regexp '^(core\.(hookspath|fsmonitor|sshcommand|pager|editor|askpass|gitproxy)|credential\..*|filter\..*|diff\..*|merge\..*\.driver|sequence\.editor|gpg\..*|include\..*|includeif\..*|url\..*|alias\..*)$' |
+  awk '$1 !~ /^alias\./ || $2 ~ /^!/ {print $1}' | sort -u | paste -sd' ' -)
+[ -z "$risky" ] && ok ".git/config sets nothing that runs code or redirects remotes" ||
+  fail ".git/config sets $risky: check them before using git on WSL"
+
+# The machine user is in sre-team: neither may own a path, or its approval would count.
+if grep -vE '^\s*(#|$)' "{{config_root}}/.github/CODEOWNERS" | grep -qiE 'bcochofel-ai-agent|sre-team'; then
+  fail "CODEOWNERS names bcochofel-ai-agent or sre-team"; else ok "CODEOWNERS names neither bcochofel-ai-agent nor sre-team"; fi
+
+if [ -n "$REMOTE_CONTAINERS" ] || [ -f /.dockerenv ]; then
+  echo "== devcontainer"
+  [ -e "$HOME/.config/sops/age/bcochofel.txt" ] && fail "your age key is in the container" || ok "your age key isn't in the container"
+  [ -e "$HOME/.secrets/homelab.yaml" ] && fail "homelab.yaml is in the container" || ok "homelab.yaml isn't in the container"
+  [ -S /var/run/docker.sock ] && fail "the Docker socket is in the container" || ok "no Docker socket"
+  if [ -e "$HOME/.config/sops/age/ci.txt" ] || [ -e "${SOPS_AGE_KEY_FILE%/*}/ci.txt" ] || [ -n "$SOPS_AGE_KEY" ]; then
+    fail "a ci key is in the container"; else ok "no ci key in the container"; fi
+  # By content, not path: devcontainer.json points it at the host-home mount.
+  [ -n "$SOPS_AGE_KEY_FILE" ] && cmp -s "$SOPS_AGE_KEY_FILE" "$agent" && ok "SOPS_AGE_KEY_FILE is the ai-agent key" || fail "SOPS_AGE_KEY_FILE isn't the ai-agent key"
+
+  echo "== devcontainer: git and GitHub act as the AI agent"
+  if [ -z "$SSH_AUTH_SOCK" ] && ! ssh-add -l >/dev/null 2>&1; then
+    ok "no ssh-agent forwarded"; else fail "an ssh-agent is reachable (SSH_AUTH_SOCK=$SSH_AUTH_SOCK)"; fi
+  # Any helper other than the agent's would answer for a host that isn't github.com.
+  if printf 'protocol=https\nhost=example.com\n\n' |
+     GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= SSH_ASKPASS= git credential fill >/dev/null 2>&1; then
+    fail "another git credential helper answers (VS Code's?)"; else ok "no git credential helper but the agent's"; fi
+  [ "$(git config user.email)" = 340075370+bcochofel-ai-agent@users.noreply.github.com ] &&
+    ok "commits are authored by bcochofel-ai-agent" || fail "commit identity is $(git config user.email)"
+  [ "$(git config core.hooksPath)" = "{{config_root}}/.devcontainer/git-hooks" ] &&
+    ok "git hooks come from .devcontainer/git-hooks" || fail "core.hooksPath isn't .devcontainer/git-hooks"
+  # An empty entry resets the list (devcontainer.json's drops VS Code's, from
+  # ~/.gitconfig): only the entries after the last one are in effect.
+  helpers=$(git config --get-all credential.helper | awk '/^$/ {h = ""; next} {h = h ? h " " $0 : $0} END {print h}')
+  [ "$helpers" = "{{config_root}}/.devcontainer/bin/git-credential-ai-agent" ] &&
+    ok "the only credential.helper is the agent's" || fail "credential.helper is: ${helpers:-none}"
+  # The agent's own WSL clone, never yours: the path inside the mounted filesystem.
+  src=$(findmnt -no FSROOT -T "{{config_root}}")
+  case "$src" in
+    "") fail "can't tell where the working copy is mounted from" ;;
+    */Projects/GitHub/BCochofelHomelab/terraform-elasticstack-workspace) fail "the working copy is your clone, $src" ;;
+    *) ok "the working copy isn't your clone (mounted from $src)" ;;
+  esac
+  for sh in bash zsh; do
+    command -v $sh >/dev/null || continue
+    [ "$($sh -ic 'command -v gh' 2>/dev/null | tail -1)" = "{{config_root}}/.devcontainer/bin/gh" ] &&
+      ok "gh in $sh is the agent's wrapper" || fail "gh in $sh isn't .devcontainer/bin/gh"
+  done
+  login=$("{{config_root}}/.devcontainer/bin/gh" api user --jq .login 2>/dev/null)
+  [ "$login" = bcochofel-ai-agent ] && ok "gh authenticates as bcochofel-ai-agent" || fail "gh authenticates as ${login:-nobody}"
+  # A dry-run push authenticates (a fetch from a public repo wouldn't) and sends nothing.
+  if git push --dry-run origin HEAD:refs/heads/boundary-check >/dev/null 2>&1; then
+    ok "git authenticates to origin over HTTPS with the agent's PAT"; else fail "git can't authenticate to origin"; fi
+  repo=$(git remote get-url origin | sed -E 's#^.*github\.com[:/]##; s#\.git$##')
+  n=$("{{config_root}}/.devcontainer/bin/gh" api "repos/$repo/rules/branches/main" \
+      --jq '[.[] | select(.type == "pull_request") | .parameters | select(.required_approving_review_count >= 1 and .require_code_owner_review)] | length' 2>/dev/null)
+  [ "${n:-0}" -ge 1 ] && ok "main requires a code owner's approval, for the agent too" ||
+    fail "main's rules for the agent lack a required code-owner approval"
+  # A commit that adds a workflow, built without touching the working copy;
+  # the PAT has no Workflows permission, so GitHub must refuse it.
+  idx=$(mktemp)
+  GIT_INDEX_FILE=$idx git read-tree HEAD
+  blob=$(echo "# check:boundary" | git hash-object -w --stdin)
+  GIT_INDEX_FILE=$idx git update-index --add --cacheinfo "100644,$blob,.github/workflows/boundary-check.yml"
+  commit=$(git commit-tree "$(GIT_INDEX_FILE=$idx git write-tree)" -p HEAD -m "check:boundary workflow push")
+  rm -f "$idx"
+  if out=$(git push origin "$commit:refs/heads/boundary-check-workflows" 2>&1); then
+    git push -q origin --delete boundary-check-workflows
+    fail "the agent pushed a workflow change (branch deleted): its PAT has the Workflows permission"
+  elif echo "$out" | grep -qi workflow; then ok "a push touching .github/workflows/ is refused"
+  else fail "workflow push check inconclusive: $(echo "$out" | tail -1)"; fi
+fi
+exit $rc
+'''
