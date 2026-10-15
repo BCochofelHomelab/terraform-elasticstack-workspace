@@ -111,9 +111,15 @@ run = "scripts/integration.sh"
 description = "Regenerate the terraform-docs sections of README.md"
 run = "terraform-docs markdown table --output-file README.md --output-mode inject ."
 
+# Tests run after lint, never alongside it: mise runs `depends` in
+# parallel, and pre-commit's terraform_validate and `tofu test` both run
+# `tofu init` in the same directories (a race that failed CI with "Missing
+# required provider"). pre-commit already validates the module and every
+# example, so `validate` isn't repeated here.
 [tasks.check]
 description = "Everything CI runs on a pull request, except the integration tests"
-depends = ["lint", "lint:secrets", "validate", "test"]
+depends = ["lint", "lint:secrets"]
+run = "mise run test"
 
 [tasks.doctor]
 description = "Diagnose the local toolchain"
