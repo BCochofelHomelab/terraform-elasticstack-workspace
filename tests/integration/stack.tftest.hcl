@@ -24,6 +24,34 @@ variables {
     viewer_groups = ["it-viewers"]
     editor_groups = ["it-editors"]
   }
+
+  # .server-log: one of the two connector types the basic license allows.
+  connectors = {
+    log = { type = ".server-log", name = "Server log" }
+  }
+  alert_actions = [{
+    connector = "log"
+    params    = "{\"level\":\"warn\",\"message\":\"{{rule.name}}: {{context.reason}}{{context.message}}\"}"
+  }]
+
+  # A workspace export, data view and summary line included, as Kibana
+  # writes it: the module drops both.
+  saved_objects = {
+    "dashboards/it.ndjson" = <<-EOT
+      {"type":"index-pattern","id":"it_workspace-logs","attributes":{"title":"logs-*-it_workspace","timeFieldName":"@timestamp"},"references":[]}
+      {"type":"search","id":"it_workspace-it-search","attributes":{"title":"IT search","columns":["message"],"sort":[["@timestamp","desc"]],"kibanaSavedObjectMeta":{"searchSourceJSON":"{\"query\":{\"query\":\"\",\"language\":\"kuery\"},\"filter\":[],\"indexRefName\":\"kibanaSavedObjectMeta.searchSourceJSON.index\"}"}},"references":[{"name":"kibanaSavedObjectMeta.searchSourceJSON.index","type":"index-pattern","id":"it_workspace-logs"}],"coreMigrationVersion":"8.8.0","typeMigrationVersion":"8.0.0"}
+      {"exportedCount":2,"missingRefCount":0,"missingReferences":[]}
+    EOT
+  }
+
+  rules = {
+    it_rule = {
+      name         = "IT rule"
+      rule_type_id = ".es-query"
+      interval     = "5m"
+      params       = "{\"searchType\":\"esQuery\",\"index\":[\"logs-*-it_workspace\"],\"timeField\":\"@timestamp\",\"esQuery\":\"{\\\"query\\\":{\\\"match_all\\\":{}}}\",\"size\":0,\"threshold\":[100],\"thresholdComparator\":\">\",\"timeWindowSize\":5,\"timeWindowUnit\":\"m\"}"
+    }
+  }
 }
 
 run "create" {
@@ -45,6 +73,26 @@ run "create" {
   assert {
     condition     = length(output.role_mapping_names) == 2
     error_message = "Both role mappings were created."
+  }
+
+  assert {
+    condition     = output.baseline_saved_objects == { overview = 3 }
+    error_message = "The baseline imported its dashboard and two searches."
+  }
+
+  assert {
+    condition     = elasticstack_kibana_import_saved_objects.workspace["dashboards/it.ndjson"].success_count == 1
+    error_message = "The workspace export imported its search, not the data view."
+  }
+
+  assert {
+    condition     = keys(output.rule_ids) == ["baseline_error_rate", "baseline_no_data", "it_rule"]
+    error_message = "The baseline rules and the workspace's rule exist."
+  }
+
+  assert {
+    condition     = alltrue([for r in elasticstack_kibana_alerting_rule.this : length(r.actions) == 1])
+    error_message = "Every rule sends to the server-log connector."
   }
 }
 

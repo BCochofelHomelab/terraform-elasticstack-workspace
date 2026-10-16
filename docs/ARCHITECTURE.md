@@ -31,7 +31,12 @@ workspace_id ──► space <id>
              ├─► default data view                  <id>-<default_data_type>
              ├─► role workspace-<id>-viewer         space: read  data: read
              ├─► role workspace-<id>-editor         space: all   data: read
-             └─► role mappings (groups [+ realm])   only for kinds with groups
+             ├─► role mappings (groups [+ realm])   only for kinds with groups
+             ├─► baseline saved objects             <id>-baseline-*   (templates/saved-objects)
+             ├─► workspace saved objects            its own exports, data views dropped
+             ├─► connectors (no secrets)            in the space
+             └─► rules <id>-baseline_no_data, <id>-baseline_error_rate, <id>-<key>
+                       all → alert_actions
 ```
 
 - **Deterministic data view ids.** A dashboard exported from one
@@ -47,6 +52,13 @@ workspace_id ──► space <id>
   entry, and the owner of the data being read approves the line (in the
   platform repo, through CODEOWNERS). It adds read privileges and a data
   view per type; it never widens a pattern.
+
+- **Baseline content is a template of an export**, rendered per workspace
+  ([`BASELINE-CONTENT.md`](BASELINE-CONTENT.md)). It's written in Kibana,
+  not by hand, so it's always in a format Kibana produced.
+- **No secret passes through a workspace.** A connector that needs one is
+  preconfigured in `kibana.yml` and referenced by id; the module only
+  creates connectors without secrets.
 
 ## What it deliberately leaves out
 

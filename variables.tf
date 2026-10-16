@@ -116,3 +116,115 @@ variable "access" {
   default  = {}
   nullable = false
 }
+
+# --- Content -----------------------------------------------------------------
+
+variable "baseline_content" {
+  description = "Import the baseline saved objects (templates/saved-objects: an Overview dashboard with a service.name selector, Logs and Errors). Needs `logs` in data_types."
+  type        = bool
+  default     = true
+  nullable    = false
+}
+
+variable "saved_objects" {
+  description = "The workspace's own content, by name: Kibana exports (.ndjson) from this workspace's space, e.g. `{ for f in fileset(...) : f => file(...) }`. Data views in them are dropped: the module owns those. Removing an entry stops managing its objects; it doesn't delete them from Kibana."
+  type        = map(string)
+  default     = {}
+  nullable    = false
+}
+
+# --- Alerting ----------------------------------------------------------------
+
+variable "connectors" {
+  description = <<-EOT
+    Connectors created in the workspace's space, by key, for alert_actions
+    to reference. Only connectors without secrets (`.server-log`, `.index`,
+    an unauthenticated `.webhook`): `config` is the type's JSON. One that
+    needs secrets is preconfigured in kibana.yml (available in every space)
+    and referenced by `connector_id`, so no secret passes through a
+    workspace's state.
+  EOT
+  type = map(object({
+    type   = string
+    name   = optional(string)
+    config = optional(string)
+  }))
+  default  = {}
+  nullable = false
+}
+
+variable "alert_actions" {
+  description = <<-EOT
+    Where the workspace's rules send alerts: the default alert destination.
+    Each entry names one connector, by `connector` (a key of connectors) or
+    `connector_id` (preconfigured, or created elsewhere in the space), with
+    the action's `params` as JSON, which depend on the connector type.
+    Params apply to every rule: `{{rule.name}}` works everywhere;
+    `{{context.reason}}` (threshold rules) and `{{context.message}}` (ES
+    query rules) render empty where they don't exist, so use both.
+  EOT
+  type = list(object({
+    connector    = optional(string)
+    connector_id = optional(string)
+    params       = string
+  }))
+  default  = []
+  nullable = false
+
+  validation {
+    condition     = alltrue([for a in var.alert_actions : (a.connector == null) != (a.connector_id == null)])
+    error_message = "Each alert action sets exactly one of connector or connector_id."
+  }
+}
+
+variable "baseline_rules" {
+  description = <<-EOT
+    The baseline rules, both on by default and both sent to alert_actions:
+    `no_data` fires when none of the workspace's data arrived in
+    `no_data_minutes`; `error_rate` (needs `logs`) fires per service.name
+    when more than `error_rate_percent` of its log lines in 5 minutes match
+    `error_filter` (KQL).
+  EOT
+  type = object({
+    no_data            = optional(bool, true)
+    no_data_minutes    = optional(number, 15)
+    error_rate         = optional(bool, true)
+    error_rate_percent = optional(number, 5)
+    error_filter       = optional(string, "log.level: (error or ERROR)")
+  })
+  default  = {}
+  nullable = false
+
+  validation {
+    condition     = var.baseline_rules.no_data_minutes >= 1 && var.baseline_rules.error_rate_percent > 0 && var.baseline_rules.error_rate_percent <= 100
+    error_message = "no_data_minutes must be at least 1, and error_rate_percent in (0, 100]."
+  }
+}
+
+variable "rules" {
+  description = <<-EOT
+    The workspace's own alerting rules, by key (`[a-z0-9_]`; the rule id is
+    `<id>-<key>`). `params` is the rule type's JSON. With `notify` (the
+    default) they send to alert_actions like the baseline rules, in the rule
+    type's default action group; a type the module doesn't know needs
+    `action_group`. Every rule is tagged `workspace:<id>`.
+  EOT
+  type = map(object({
+    name         = string
+    rule_type_id = string
+    consumer     = optional(string, "alerts")
+    interval     = optional(string, "1m")
+    params       = string
+    enabled      = optional(bool, true)
+    tags         = optional(set(string), [])
+    notify       = optional(bool, true)
+    action_group = optional(string)
+  }))
+  default  = {}
+  nullable = false
+
+  validation {
+    condition     = alltrue([for k in keys(var.rules) : can(regex("^[a-z0-9_]{1,64}$", k)) && !startswith(k, "baseline")])
+    error_message = "Rule keys match ^[a-z0-9_]{1,64}$ and don't start with \"baseline\" (the baseline rules' prefix)."
+  }
+}
