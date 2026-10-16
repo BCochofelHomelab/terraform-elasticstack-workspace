@@ -61,6 +61,16 @@ repos:
         files: ^(\.devcontainer/post-create\.sh|\.github/workflows/.*\.ya?ml|scripts/check_mise_version\.py)$
         pass_filenames: false
 
+      # The module's unit tests (tests/*.tftest.hcl): plans against a mocked
+      # provider, so no cluster and no credentials. The integration tests
+      # (tests/integration/) need Docker: `mise run test:integration`.
+      - id: tofu_test
+        name: tofu test (unit)
+        language: system
+        entry: bash -c 'tofu init -backend=false -input=false >/dev/null && tofu test -no-color'
+        files: (\.tf|\.tftest\.hcl|\.tftpl)$
+        pass_filenames: false
+
       # GitHub Actions workflows. actionlint: syntax, expressions, and
       # shellcheck on run: steps. zizmor: security (injection, permissions,
       # credentials, unpinned actions); --offline, so no GitHub API calls.
