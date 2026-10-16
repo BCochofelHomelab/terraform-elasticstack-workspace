@@ -31,9 +31,13 @@ Workspace ids allow only `a-z`, `0-9` and `_` (a namespace can't contain
 | `read_from`: another workspace's data, approved by its owner: a data view and read privileges per type | the same, plus the roles below |
 | Roles `workspace-<id>-viewer` (reads the space) and `workspace-<id>-editor` (all of the space), both read-only on the data | `elasticstack_kibana_security_role` |
 | Role mappings from groups (optionally one realm) to those roles; no groups, no access | `elasticstack_elasticsearch_security_role_mapping` |
+| Baseline content: an Overview dashboard with a `service.name` selector, Logs and Errors | `elasticstack_kibana_import_saved_objects` |
+| The workspace's own dashboards and searches (Kibana exports) | `elasticstack_kibana_import_saved_objects` |
+| Connectors without secrets, and the default alert destination (`alert_actions`) | `elasticstack_kibana_action_connector` |
+| Baseline rules (No data, Error rate) and the workspace's own rules | `elasticstack_kibana_alerting_rule` |
 
-Baseline dashboards, alerting rules and a workspace's own content come
-next. What the module deliberately leaves out (Fleet, integration
+What's in the baseline and how to change it:
+[`docs/BASELINE-CONTENT.md`](docs/BASELINE-CONTENT.md). What the module deliberately leaves out (Fleet, integration
 packages, ILM, templates, pipelines) and why:
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -54,6 +58,11 @@ module "workspace" {
     viewer_groups = ["otel-demo-viewers"]
     editor_groups = ["otel-demo-editors"]
   }
+
+  alert_actions = [{
+    connector_id = "homelab-email" # preconfigured in kibana.yml
+    params       = jsonencode({ to = ["sre@example.org"], subject = "{{rule.name}}", message = "{{context.reason}}{{context.message}}" })
+  }]
 }
 ```
 
@@ -103,8 +112,12 @@ No modules.
 | Name | Type |
 | ---- | ---- |
 | [elasticstack_elasticsearch_security_role_mapping.this](https://registry.terraform.io/providers/elastic/elasticstack/latest/docs/resources/elasticsearch_security_role_mapping) | resource |
+| [elasticstack_kibana_action_connector.this](https://registry.terraform.io/providers/elastic/elasticstack/latest/docs/resources/kibana_action_connector) | resource |
+| [elasticstack_kibana_alerting_rule.this](https://registry.terraform.io/providers/elastic/elasticstack/latest/docs/resources/kibana_alerting_rule) | resource |
 | [elasticstack_kibana_data_view.this](https://registry.terraform.io/providers/elastic/elasticstack/latest/docs/resources/kibana_data_view) | resource |
 | [elasticstack_kibana_default_data_view.this](https://registry.terraform.io/providers/elastic/elasticstack/latest/docs/resources/kibana_default_data_view) | resource |
+| [elasticstack_kibana_import_saved_objects.baseline](https://registry.terraform.io/providers/elastic/elasticstack/latest/docs/resources/kibana_import_saved_objects) | resource |
+| [elasticstack_kibana_import_saved_objects.workspace](https://registry.terraform.io/providers/elastic/elasticstack/latest/docs/resources/kibana_import_saved_objects) | resource |
 | [elasticstack_kibana_security_role.this](https://registry.terraform.io/providers/elastic/elasticstack/latest/docs/resources/kibana_security_role) | resource |
 | [elasticstack_kibana_space.this](https://registry.terraform.io/providers/elastic/elasticstack/latest/docs/resources/kibana_space) | resource |
 
@@ -113,7 +126,11 @@ No modules.
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_access"></a> [access](#input\_access) | Who gets the workspace's roles, through role mappings. Groups match the<br/>user's `groups` (an OIDC or SAML claim, LDAP groups); `realm`, when set,<br/>limits the mappings to that realm. No groups, no mapping: nobody has<br/>access by default. Native users are given the role names (outputs)<br/>directly. | <pre>object({<br/>    realm         = optional(string)<br/>    viewer_groups = optional(set(string), [])<br/>    editor_groups = optional(set(string), [])<br/>  })</pre> | `{}` | no |
+| <a name="input_alert_actions"></a> [alert\_actions](#input\_alert\_actions) | Where the workspace's rules send alerts: the default alert destination.<br/>Each entry names one connector, by `connector` (a key of connectors) or<br/>`connector_id` (preconfigured, or created elsewhere in the space), with<br/>the action's `params` as JSON, which depend on the connector type.<br/>Params apply to every rule: `{{rule.name}}` works everywhere;<br/>`{{context.reason}}` (threshold rules) and `{{context.message}}` (ES<br/>query rules) render empty where they don't exist, so use both. | <pre>list(object({<br/>    connector    = optional(string)<br/>    connector_id = optional(string)<br/>    params       = string<br/>  }))</pre> | `[]` | no |
+| <a name="input_baseline_content"></a> [baseline\_content](#input\_baseline\_content) | Import the baseline saved objects (templates/saved-objects: an Overview dashboard with a service.name selector, Logs and Errors). Needs `logs` in data\_types. | `bool` | `true` | no |
+| <a name="input_baseline_rules"></a> [baseline\_rules](#input\_baseline\_rules) | The baseline rules, both on by default and both sent to alert\_actions:<br/>`no_data` fires when none of the workspace's data arrived in<br/>`no_data_minutes`; `error_rate` (needs `logs`) fires per service.name<br/>when more than `error_rate_percent` of its log lines in 5 minutes match<br/>`error_filter` (KQL). | <pre>object({<br/>    no_data            = optional(bool, true)<br/>    no_data_minutes    = optional(number, 15)<br/>    error_rate         = optional(bool, true)<br/>    error_rate_percent = optional(number, 5)<br/>    error_filter       = optional(string, "log.level: (error or ERROR)")<br/>  })</pre> | `{}` | no |
 | <a name="input_color"></a> [color](#input\_color) | The space avatar's colour, as `#rrggbb`. Kibana picks one from the name when null. | `string` | `null` | no |
+| <a name="input_connectors"></a> [connectors](#input\_connectors) | Connectors created in the workspace's space, by key, for alert\_actions<br/>to reference. Only connectors without secrets (`.server-log`, `.index`,<br/>an unauthenticated `.webhook`): `config` is the type's JSON. One that<br/>needs secrets is preconfigured in kibana.yml (available in every space)<br/>and referenced by `connector_id`, so no secret passes through a<br/>workspace's state. | <pre>map(object({<br/>    type   = string<br/>    name   = optional(string)<br/>    config = optional(string)<br/>  }))</pre> | `{}` | no |
 | <a name="input_data_types"></a> [data\_types](#input\_data\_types) | The data stream types the workspace has: one data view `<type>-*-<id>` per type, and index privileges on the same patterns. | `list(string)` | <pre>[<br/>  "logs",<br/>  "metrics",<br/>  "traces"<br/>]</pre> | no |
 | <a name="input_default_data_type"></a> [default\_data\_type](#input\_default\_data\_type) | The data type whose data view is the space's default. Must be in data\_types. | `string` | `"logs"` | no |
 | <a name="input_description"></a> [description](#input\_description) | The space's description: who owns the workspace and what it observes. | `string` | `null` | no |
@@ -121,6 +138,8 @@ No modules.
 | <a name="input_display_name"></a> [display\_name](#input\_display\_name) | The space's display name in Kibana. Can change at any time. | `string` | n/a | yes |
 | <a name="input_initials"></a> [initials](#input\_initials) | One or two characters for the space avatar. Kibana derives them from the name when null. | `string` | `null` | no |
 | <a name="input_read_from"></a> [read\_from](#input\_read\_from) | Other workspaces whose data this one may read. The data's owner approves each entry. Adds index privileges and a data view `<type>-*-<other>` per data type. | `set(string)` | `[]` | no |
+| <a name="input_rules"></a> [rules](#input\_rules) | The workspace's own alerting rules, by key (`[a-z0-9_]`; the rule id is<br/>`<id>-<key>`). `params` is the rule type's JSON. With `notify` (the<br/>default) they send to alert\_actions like the baseline rules, in the rule<br/>type's default action group; a type the module doesn't know needs<br/>`action_group`. Every rule is tagged `workspace:<id>`. | <pre>map(object({<br/>    name         = string<br/>    rule_type_id = string<br/>    consumer     = optional(string, "alerts")<br/>    interval     = optional(string, "1m")<br/>    params       = string<br/>    enabled      = optional(bool, true)<br/>    tags         = optional(set(string), [])<br/>    notify       = optional(bool, true)<br/>    action_group = optional(string)<br/>  }))</pre> | `{}` | no |
+| <a name="input_saved_objects"></a> [saved\_objects](#input\_saved\_objects) | The workspace's own content, by name: Kibana exports (.ndjson) from this workspace's space, e.g. `{ for f in fileset(...) : f => file(...) }`. Data views in them are dropped: the module owns those. Removing an entry stops managing its objects; it doesn't delete them from Kibana. | `map(string)` | `{}` | no |
 | <a name="input_solution"></a> [solution](#input\_solution) | The space's solution view: `oblt` (Observability), `classic`, `es` or `security`. | `string` | `"oblt"` | no |
 | <a name="input_workspace_id"></a> [workspace\_id](#input\_workspace\_id) | The workspace's permanent id. It is the Kibana space id and the data stream namespace (`<type>-<dataset>-<id>`), so only `a-z`, `0-9` and `_`, and never `default`. Changing it replaces everything. | `string` | n/a | yes |
 
@@ -128,11 +147,14 @@ No modules.
 
 | Name | Description |
 | ---- | ----------- |
+| <a name="output_baseline_saved_objects"></a> [baseline\_saved\_objects](#output\_baseline\_saved\_objects) | The baseline templates imported, by name, with how many objects each imported. |
+| <a name="output_connector_ids"></a> [connector\_ids](#output\_connector\_ids) | The connectors created in the space, by key. |
 | <a name="output_data_view_ids"></a> [data\_view\_ids](#output\_data\_view\_ids) | Data view ids by key: `<type>` for the workspace's own, `<type>/<workspace>` for each read\_from workspace. |
 | <a name="output_default_data_view_id"></a> [default\_data\_view\_id](#output\_default\_data\_view\_id) | The id of the space's default data view. |
 | <a name="output_index_patterns"></a> [index\_patterns](#output\_index\_patterns) | The index patterns the workspace's roles may read. |
 | <a name="output_role_mapping_names"></a> [role\_mapping\_names](#output\_role\_mapping\_names) | The role mappings created, by kind: only the kinds with groups in access. |
 | <a name="output_role_names"></a> [role\_names](#output\_role\_names) | The workspace's role names, by kind (`viewer`, `editor`): bound to groups by the module, or given to native users directly. |
+| <a name="output_rule_ids"></a> [rule\_ids](#output\_rule\_ids) | The alerting rules' ids, by key: `baseline_no_data`, `baseline_error_rate`, then the workspace's own. |
 | <a name="output_space_id"></a> [space\_id](#output\_space\_id) | The Kibana space id (the workspace id). |
 <!-- END_TF_DOCS -->
 <!-- markdownlint-enable MD033 -->

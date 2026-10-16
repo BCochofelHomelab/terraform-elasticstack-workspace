@@ -2,7 +2,9 @@
 
 One workspace, `otel_demo`, on the homelab's self-managed Elastic Stack:
 its space and data views, read access to the `platform` workspace's data,
-and viewer and editor groups from the SSO realm. It's the shape a
+viewer and editor groups from the SSO realm, the baseline dashboard and
+rules sending to a server-log connector, and its own content from
+[`dashboards/`](dashboards). It's the shape a
 `homelab-proxmox-platform` workspace stack generates.
 
 ```bash

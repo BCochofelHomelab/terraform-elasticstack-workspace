@@ -27,3 +27,18 @@ output "role_mapping_names" {
   description = "The role mappings created, by kind: only the kinds with groups in access."
   value       = { for k, v in elasticstack_elasticsearch_security_role_mapping.this : k => v.name }
 }
+
+output "baseline_saved_objects" {
+  description = "The baseline templates imported, by name, with how many objects each imported."
+  value       = { for k, v in elasticstack_kibana_import_saved_objects.baseline : k => v.success_count }
+}
+
+output "connector_ids" {
+  description = "The connectors created in the space, by key."
+  value       = { for k, v in elasticstack_kibana_action_connector.this : k => v.connector_id }
+}
+
+output "rule_ids" {
+  description = "The alerting rules' ids, by key: `baseline_no_data`, `baseline_error_rate`, then the workspace's own."
+  value       = { for k, v in elasticstack_kibana_alerting_rule.this : k => v.rule_id }
+}
