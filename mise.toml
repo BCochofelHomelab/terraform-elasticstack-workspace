@@ -87,8 +87,16 @@ description = "Scan the full git history for leaked secrets (gitleaks)"
 run = "gitleaks git --redact --no-banner ."
 
 [tasks.check]
-description = "Everything CI runs on a pull request"
+description = "Everything CI runs on a pull request (the pre-commit job; integration is its own job)"
 depends = ["lint", "lint:secrets"]
+
+[tasks.test]
+description = "Unit tests: tofu test with a mocked provider (also a pre-commit hook)"
+run = ["tofu init -backend=false -input=false", "tofu test"]
+
+[tasks."test:integration"]
+description = "Integration tests: a throwaway Elasticsearch + Kibana 9.5.4 in Docker, apply, no drift, destroy"
+run = "scripts/integration.sh"
 
 [tasks.doctor]
 description = "Diagnose the local toolchain"

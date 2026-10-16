@@ -66,4 +66,12 @@ mise trust && mise install   # the pinned toolchain, git hooks, TFLint plugins
 mise run lint                # every pre-commit hook on every file
 mise run check               # lint + gitleaks on the full history (what CI runs)
 mise run check:boundary      # the agent's boundary holds
+mise run test                # unit tests (mock_provider)
+mise run test:integration    # needs Docker: not in the devcontainer
 ```
+
+The devcontainer has no Docker socket, by design: to run the integration
+tests locally, start Elasticsearch and Kibana 9.5.4 from Elastic's tarballs
+in the scratchpad (same settings as `tests/integration/compose.yml`) and
+run `tofu test -test-directory=tests/integration` with `ELASTICSEARCH_*` /
+`KIBANA_*` exported in that command only.

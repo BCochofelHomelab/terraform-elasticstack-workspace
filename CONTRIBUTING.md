@@ -48,9 +48,20 @@ gitleaks, actionlint and zizmor on workflows, and commitlint. CI runs the
 same.
 
 ```bash
-mise run lint      # every hook on every file
-mise run check     # the above + gitleaks on the full history (what CI runs)
+mise run lint               # every hook on every file
+mise run check              # the above + gitleaks on the full history (what CI runs)
+mise run test               # unit tests: tofu test with a mocked provider (also a hook)
+mise run test:integration   # a throwaway Elasticsearch + Kibana 9.5.4 in Docker
 ```
+
+CI's `integration` job runs `scripts/integration.sh` on GitHub's runners:
+apply, assert, update, no drift, destroy, on a stack that only lives for
+the job. How the tests are built: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#testing).
+
+Releases are automatic on merge, from the commit types:
+[`docs/RELEASING.md`](docs/RELEASING.md). A change that renames anything
+derived from the workspace id, or removes or retypes an input or output,
+is breaking (`feat!:`).
 
 Two repo-specific rules the hooks enforce:
 
