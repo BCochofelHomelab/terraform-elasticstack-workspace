@@ -1,0 +1,60 @@
+---
+# Runs semantic-release on every push to main: the same as
+# homelab-proxmox-core's. Config lives in .releaserc.js
+# (conventional-commits analyzer -> release notes -> GitHub Release + git
+# tag, unprefixed: 1.0.0). No CHANGELOG.md, no commit back to the branch.
+# Releases come from main only: both this trigger and .releaserc.js's
+# `branches` list just `main`.
+#
+# Uses the default GITHUB_TOKEN, not a PAT. Nothing is pushed to main:
+# publishing a GitHub Release and creating a tag via the API isn't a branch
+# push, so main's "require a pull request" rule doesn't block it and needs
+# no bypass actor.
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: semantic-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the tag and the GitHub Release
+      issues: write # @semantic-release/github comments on released issues
+      pull-requests: write # ... and on released pull requests
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          # semantic-release authenticates with GITHUB_TOKEN from its env.
+          persist-credentials: false
+
+      - name: Set up Node.js (pinned in mise.toml)
+        # Same node as laptops and ci.yml, checksum-verified from mise.lock
+        # (MISE_LOCKED). semantic-release@25 requires Node ^22.14.0 ||
+        # >=24.10.0; keep mise.toml's node pin inside that range. Only node
+        # is installed; MISE_SKIP_BOOTSTRAP skips the postinstall bootstrap.
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          version: "2026.10.9" # mise itself: the same as .devcontainer/post-create.sh
+          install_args: node
+        env:
+          MISE_LOCKED: "1"
+          MISE_SKIP_BOOTSTRAP: "1"
+
+      - name: Install release dependencies
+        run: npm ci
+
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx semantic-release

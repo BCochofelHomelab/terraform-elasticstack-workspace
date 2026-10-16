@@ -19,6 +19,11 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels its older runs.
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 env:
   # Install exactly what mise.lock records (versions and checksums). A
   # mise.toml change without a matching `mise lock` fails here.
@@ -26,6 +31,7 @@ env:
 
 jobs:
   pre-commit:
+    name: pre-commit
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -54,3 +60,30 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }} # tflint plugin downloads
         run: mise run check
+
+  # The module against a real Elasticsearch + Kibana 9.5.4: a throwaway
+  # single-node stack in Docker on this runner (tests/integration/
+  # compose.yml), random passwords per run, nothing kept. Applies, asserts,
+  # checks the example plans clean after apply, destroys.
+  integration:
+    name: integration (Elastic Stack 9.5.4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # nothing here pushes
+
+      - name: Install OpenTofu (pinned in mise.toml)
+        # Only opentofu; MISE_SKIP_BOOTSTRAP skips the postinstall bootstrap
+        # (git hooks, TFLint plugins), which this job doesn't need.
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          version: "2026.10.9" # mise itself: the same as .devcontainer/post-create.sh
+          install_args: opentofu
+        env:
+          MISE_SKIP_BOOTSTRAP: "1"
+
+      - name: Integration tests
+        run: scripts/integration.sh
